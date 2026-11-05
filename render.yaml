@@ -1,0 +1,7 @@
+# Render "Blueprint": lets you deploy with one click from a GitHub repo.
+services:
+  - type: web
+    name: callsheet-demo
+    runtime: docker
+    plan: free
+    healthCheckPath: /actuator/health
