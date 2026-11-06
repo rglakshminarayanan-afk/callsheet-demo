@@ -17,8 +17,15 @@ public final class Models {
 
     public record User(String id, String name, Role role, String org, String email) {}
 
-    public record Actor(String id, String name, String managerId, List<String> languages,
-                        List<String> genres, String city, String bio) {}
+    public record Credit(int year, String title, String role, String type) {}
+
+    public record Actor(String id, String name, String managerId, String industry,
+                        List<String> languages, List<String> genres, String city, String bio,
+                        String playingAge, String height, List<String> skills,
+                        List<String> training, List<Credit> credits, List<String> awards) {}
+
+    /** An uploaded or generated acting resume (always a PDF). */
+    public record ResumeFile(String filename, byte[] data, Instant uploadedAt, String uploadedBy) {}
 
     /** A busy period. Anything not covered by a block counts as available. */
     public record Block(String id, String actorId, LocalDate start, LocalDate end,

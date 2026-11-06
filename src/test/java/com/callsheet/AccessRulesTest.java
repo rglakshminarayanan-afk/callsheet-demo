@@ -6,9 +6,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -62,6 +64,34 @@ class AccessRulesTest {
                         .header("Authorization", login("p1"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"start\":\"2030-01-01\",\"end\":\"2030-01-02\",\"type\":\"VACATION\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void productionHouseCanOpenAResumeButCannotUploadOne() throws Exception {
+        String p1 = login("p1");
+        mvc.perform(get("/api/actors/a1/resume").header("Authorization", p1)).andExpect(status().isOk());
+        MockMultipartFile pdf = new MockMultipartFile("file", "cv.pdf", "application/pdf", "%PDF-1.4 test".getBytes());
+        mvc.perform(multipart("/api/actors/a3/resume").file(pdf).header("Authorization", p1))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void managerCanUploadPdfButNotOtherFiles() throws Exception {
+        String m1 = login("m1");
+        MockMultipartFile pdf = new MockMultipartFile("file", "cv.pdf", "application/pdf", "%PDF-1.4 test".getBytes());
+        mvc.perform(multipart("/api/actors/a3/resume").file(pdf).header("Authorization", m1))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resume.filename").value("cv.pdf"));
+        MockMultipartFile text = new MockMultipartFile("file", "cv.pdf", "application/pdf", "not a pdf".getBytes());
+        mvc.perform(multipart("/api/actors/a3/resume").file(text).header("Authorization", m1))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void managerCannotUploadForAnotherManagersActor() throws Exception {
+        MockMultipartFile pdf = new MockMultipartFile("file", "cv.pdf", "application/pdf", "%PDF-1.4 test".getBytes());
+        mvc.perform(multipart("/api/actors/a4/resume").file(pdf).header("Authorization", login("m1")))
                 .andExpect(status().isForbidden());
     }
 }

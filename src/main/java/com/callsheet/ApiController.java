@@ -7,7 +7,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.io.IOException;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -29,6 +32,7 @@ import java.util.*;
 public class ApiController {
 
     private static final String AUTH = "Authorization";
+    private static final long MAX_RESUME_BYTES = 2L * 1024 * 1024;
     private final DataStore db;
 
     public ApiController(DataStore db) {
@@ -45,8 +49,11 @@ public class ApiController {
     public record CounterRequest(LocalDate date, String time, String comment) {}
 
     public record BlockView(String id, LocalDate start, LocalDate end, String type, String note) {}
-    public record ActorView(String id, String name, String city, List<String> languages,
-                            List<String> genres, String bio, String managerName,
+    public record ResumeInfo(String filename, long sizeBytes, Instant uploadedAt, String uploadedBy) {}
+    public record ActorView(String id, String name, String industry, String city, List<String> languages,
+                            List<String> genres, String bio, String playingAge, String height,
+                            List<String> skills, List<String> training, List<Credit> credits,
+                            List<String> awards, String managerName, ResumeInfo resume,
                             List<BlockView> blocks) {}
     public record MeetingView(String id, String actorId, String actorName, String managerName,
                               String productionUserName, String productionOrg, String projectTitle,
@@ -145,6 +152,49 @@ public class ApiController {
         User u = auth(auth);
         Actor a = actorFor(u, id, true);
         if (!db.removeBlock(a.id(), blockId)) throw status(HttpStatus.NOT_FOUND, "That entry no longer exists");
+        return actorView(a, false);
+    }
+
+    // ---------- resumes ----------
+
+    /** Upload or replace the actor's acting resume. Managers only, own actors only, PDF only, 2 MB max. */
+    @PostMapping("/actors/{id}/resume")
+    public synchronized ActorView uploadResume(@RequestHeader(value = AUTH, required = false) String auth,
+                                               @PathVariable("id") String id,
+                                               @RequestParam("file") MultipartFile file) throws IOException {
+        User u = auth(auth);
+        Actor a = actorFor(u, id, true);
+        if (file == null || file.isEmpty()) throw status(HttpStatus.BAD_REQUEST, "Choose a PDF file to upload");
+        if (file.getSize() > MAX_RESUME_BYTES) throw status(HttpStatus.BAD_REQUEST, "The file is larger than 2 MB");
+        byte[] data = file.getBytes();
+        boolean pdf = data.length > 5 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F' && data[4] == '-';
+        if (!pdf) throw status(HttpStatus.BAD_REQUEST, "Only PDF files are accepted");
+        db.putResume(a.id(), new ResumeFile(cleanName(file.getOriginalFilename()), data, Instant.now(), u.name()));
+        return actorView(a, false);
+    }
+
+    /** Production houses and the actor's own manager can read the resume. */
+    @GetMapping("/actors/{id}/resume")
+    public ResponseEntity<byte[]> resume(@RequestHeader(value = AUTH, required = false) String auth,
+                                         @PathVariable("id") String id) {
+        User u = auth(auth);
+        Actor a = actorFor(u, id, false);
+        ResumeFile f = db.resume(a.id());
+        if (f == null) throw status(HttpStatus.NOT_FOUND, "No resume has been uploaded for this actor yet");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + f.filename() + "\"")
+                .header("X-Content-Type-Options", "nosniff")
+                .header("Cache-Control", "no-store")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(f.data());
+    }
+
+    @DeleteMapping("/actors/{id}/resume")
+    public synchronized ActorView removeResume(@RequestHeader(value = AUTH, required = false) String auth,
+                                               @PathVariable("id") String id) {
+        User u = auth(auth);
+        Actor a = actorFor(u, id, true);
+        if (!db.removeResume(a.id())) throw status(HttpStatus.NOT_FOUND, "There is no resume to remove");
         return actorView(a, false);
     }
 
@@ -332,6 +382,7 @@ public class ApiController {
     private boolean matches(Actor a, String q) {
         return a.name().toLowerCase().contains(q)
                 || a.city().toLowerCase().contains(q)
+                || a.industry().toLowerCase().contains(q)
                 || a.languages().stream().anyMatch(l -> l.toLowerCase().contains(q))
                 || a.genres().stream().anyMatch(g -> g.toLowerCase().contains(q));
     }
@@ -343,8 +394,11 @@ public class ApiController {
                 .filter(b -> !b.end().isBefore(from) && !b.start().isAfter(to))
                 .map(b -> blockView(b, mask))
                 .toList();
-        return new ActorView(a.id(), a.name(), a.city(), a.languages(), a.genres(), a.bio(),
-                db.users.get(a.managerId()).name(), blocks);
+        ResumeFile rf = db.resume(a.id());
+        ResumeInfo info = rf == null ? null : new ResumeInfo(rf.filename(), rf.data().length, rf.uploadedAt(), rf.uploadedBy());
+        return new ActorView(a.id(), a.name(), a.industry(), a.city(), a.languages(), a.genres(), a.bio(),
+                a.playingAge(), a.height(), a.skills(), a.training(), a.credits(), a.awards(),
+                db.users.get(a.managerId()).name(), info, blocks);
     }
 
     private BlockView blockView(Block b, boolean mask) {
@@ -389,6 +443,17 @@ public class ApiController {
     private String ics(String s) {
         return s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
                 .replace("\r", "").replace("\n", "\\n");
+    }
+
+    private String cleanName(String raw) {
+        String n = raw == null ? "" : raw;
+        int slash = Math.max(n.lastIndexOf('/'), n.lastIndexOf('\\'));
+        if (slash >= 0) n = n.substring(slash + 1);
+        n = n.replaceAll("[^A-Za-z0-9 ._()-]", "_").trim();
+        if (n.length() > 80) n = n.substring(n.length() - 80);
+        if (n.isBlank()) n = "resume.pdf";
+        if (!n.toLowerCase().endsWith(".pdf")) n = n + ".pdf";
+        return n;
     }
 
     private ResponseStatusException status(HttpStatus s, String msg) {

@@ -89,7 +89,7 @@ footer { max-width: 1240px; margin: 0 auto; padding: 0 20px 40px; }
 
 /* ---------- schedule strip (the signature element) ---------- */
 .tl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
-.tl { display: grid; grid-template-columns: 210px repeat(var(--n), minmax(26px, 1fr)); min-width: 940px; }
+.tl { display: grid; grid-template-columns: 250px repeat(var(--n), minmax(26px, 1fr)); min-width: 980px; }
 .tl > * { border-bottom: 1px solid var(--line); }
 .tl-corner, .tl-name { position: sticky; left: 0; background: var(--panel); z-index: 2; border-right: 1px solid var(--line); }
 .tl-corner { padding: 10px 14px; color: var(--ink-2); font-size: 0.85rem; align-self: end; }
@@ -99,7 +99,7 @@ footer { max-width: 1240px; margin: 0 auto; padding: 0 20px 40px; }
 .tl-day.weekend { background: #F7F6FA; }
 .tl-day.today b { background: var(--ink); color: #fff; border-radius: 99px; width: 24px; margin: 0 auto; }
 .tl-day.monthstart { border-left: 2px solid var(--ink); }
-.tl-name { padding: 8px 14px; text-align: left; border-top: 0; border-left: 0; cursor: pointer; font: inherit; }
+.tl-name { padding: 8px 14px; text-align: left; border-top: 0; border-left: 0; cursor: pointer; font: inherit; display: flex; align-items: center; gap: 10px; }
 .tl-name:hover b { text-decoration: underline; }
 .tl-name b { display: block; font-weight: 600; }
 .tl-name span { display: block; font-size: 0.8rem; color: var(--ink-2); }
@@ -197,3 +197,16 @@ dialog::backdrop { background: rgba(27,31,59,0.55); }
 .hero-strip .tl-name { cursor: default; padding: 6px 10px; font-weight: 600; font-size: 0.85rem; }
 .hero-strip .tl-cell { min-height: 30px; cursor: default; }
 .hero-strip .tl-cell:not(.busy):hover { background: var(--free); }
+
+/* ---------- profiles and resumes ---------- */
+.avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; font-weight: 700; font-family: var(--display); flex: none; letter-spacing: 0.02em; }
+.tl-name .has-resume { color: var(--ok); font-weight: 600; }
+dialog.wide { width: min(760px, calc(100vw - 24px)); }
+.psec h3 { font-size: 0.95rem; margin-bottom: 6px; }
+.plain { margin: 0; padding-left: 18px; }
+.credits { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+.credits td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+.credits .yr { width: 52px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; }
+.visually-hidden:focus-visible + label { outline: 3px solid var(--marigold); outline-offset: 2px; }
+label.btn { display: inline-block; cursor: pointer; }

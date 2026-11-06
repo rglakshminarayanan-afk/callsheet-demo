@@ -60,9 +60,10 @@ const S = {
 // ---------- api ----------
 async function api(path, { method = 'GET', body, raw = false } = {}) {
   const headers = {};
-  if (body) headers['Content-Type'] = 'application/json';
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+  if (body && !isForm) headers['Content-Type'] = 'application/json';
   if (S.token) headers.Authorization = 'Bearer ' + S.token;
-  const res = await fetch('/api' + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch('/api' + path, { method, headers, body: body ? (isForm ? body : JSON.stringify(body)) : undefined });
   if (res.status === 401 && S.token) {
     signOut();
     throw new Error('Your session ended. Please sign in again');
@@ -82,8 +83,9 @@ function toast(msg, isErr = false) {
   setTimeout(() => t.remove(), isErr ? 6000 : 3200);
 }
 
-function openDialog({ title, sub, body, actions }) {
+function openDialog({ title, sub, body, actions, wide = false }) {
   const dlg = $('#dlg');
+  dlg.className = wide ? 'wide' : '';
   dlg.replaceChildren(
     h('div', { class: 'dlg-head' }, h('h2', {}, title), sub ? h('p', { class: 'muted small', style: { marginTop: '6px' } }, sub) : null),
     h('div', { class: 'dlg-body' }, body),
@@ -104,6 +106,14 @@ function openDialog({ title, sub, body, actions }) {
 
 const field = (label, input) => h('label', { class: 'field' }, h('span', {}, label), input);
 const closeBtn = (label = 'Cancel') => ({ label, close: true });
+
+/** Initials on a colour derived from the name. Stands in for a headshot in the demo. */
+function avatar(name, size = 40) {
+  const initials = name.split(' ').map(w => w[0]).slice(0, 2).join('');
+  let hue = 0; for (const ch of name) hue = (hue * 31 + ch.charCodeAt(0)) % 360;
+  return h('span', { class: 'avatar', 'aria-hidden': 'true',
+    style: { width: size + 'px', height: size + 'px', fontSize: Math.round(size * 0.4) + 'px', background: `hsl(${hue} 38% 36%)` } }, initials);
+}
 
 // ---------- sign in / out ----------
 async function signIn(userId) {
@@ -192,7 +202,7 @@ function render() {
         tabBtn('home', isMgr ? 'My actors' : 'Find talent'),
         tabBtn('meetings', 'Meetings', h('span', { class: 'badge-count', id: 'mbadge', hidden: true }, '0')))),
     h('main', { id: 'main' }),
-    h('footer', {}, h('p', { class: 'muted small' }, 'Fictional demo data. ',
+    h('footer', {}, h('p', { class: 'muted small' }, 'Demo data: every person, film and credit is fictional. ',
       h('button', { class: 'btn small quiet', onclick: resetDemo }, 'Reset demo data'))));
 
   if (S.tab === 'meetings') viewMeetings(); else (isMgr ? viewCalendar() : viewFind());
@@ -218,7 +228,7 @@ const busyAt = (actor, ds) => actor.blocks.find(b => b.start <= ds && ds <= b.en
 // =====================================================================
 // PRODUCTION HOUSE: find talent (schedule strip)
 // =====================================================================
-const LANGS = ['Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Marathi', 'Punjabi', 'Urdu'];
+const LANGS = ['Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Marathi', 'Punjabi', 'Urdu'];
 
 function viewFind() {
   const main = $('#main');
@@ -226,7 +236,7 @@ function viewFind() {
   let timer;
   const refresh = () => { clearTimeout(timer); timer = setTimeout(loadResults, 200); };
 
-  const q = h('input', { type: 'search', placeholder: 'Name, genre, language or city', value: S.filters.q,
+  const q = h('input', { type: 'search', placeholder: 'Name, industry, genre, language or city', value: S.filters.q,
     oninput: e => { S.filters.q = e.target.value; refresh(); } });
   const lang = h('select', { onchange: e => { S.filters.language = e.target.value; refresh(); } },
     h('option', { value: '' }, 'Any language'), LANGS.map(l => h('option', { value: l }, l)));
@@ -295,7 +305,8 @@ function drawStrip(container, actors) {
   });
   for (const a of actors) {
     grid.append(h('button', { class: 'tl-name', onclick: () => openProfile(a) },
-      h('b', {}, a.name), h('span', {}, a.city), h('span', {}, a.languages.join(', '))));
+      avatar(a.name, 34),
+      h('div', {}, h('b', {}, a.name), h('span', {}, a.industry), a.resume ? h('span', { class: 'has-resume' }, 'Resume on file') : null)));
     for (const d of days) {
       const ds = iso(d);
       const busy = busyAt(a, ds);
@@ -310,20 +321,53 @@ function drawStrip(container, actors) {
   container.replaceChildren(nav, h('div', { class: 'tl-wrap' }, grid));
 }
 
+function creditsTable(credits) {
+  return h('table', { class: 'credits' }, h('tbody', {}, credits.map(c => h('tr', {},
+    h('td', { class: 'yr' }, c.year),
+    h('td', {}, h('strong', {}, c.title), `, ${c.role}`),
+    h('td', { class: 'muted' }, c.type)))));
+}
+
+async function openResume(a) {
+  try {
+    const res = await api(`/actors/${a.id}/resume`, { raw: true });
+    const url = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: 'application/pdf' }));
+    const link = h('a', { href: url, target: '_blank', rel: 'noopener' });
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { toast(e.message, true); }
+}
+
+const kb = n => Math.max(1, Math.round(n / 1024)) + ' KB';
+
 function openProfile(a) {
   const upcoming = a.blocks.filter(b => b.end >= iso(TODAY));
-  const isMgr = S.user.role === 'MANAGER';
+  const word = t => t === 'SHOOTING' ? 'Shooting' : t === 'VACATION' ? 'Vacation' : 'Busy';
+  const tags = items => h('div', { class: 'tagrow' }, items.map(i => h('span', { class: 'tag-pill' }, i)));
+  const sec = (title, node) => h('section', { class: 'psec' }, h('h3', {}, title), node);
+
+  const resume = a.resume
+    ? h('div', { class: 'row' },
+        h('div', { class: 'grow' }, h('strong', {}, a.resume.filename),
+          h('div', { class: 'muted small' }, `${kb(a.resume.sizeBytes)}, uploaded ${fmtWhen(a.resume.uploadedAt)} by ${a.resume.uploadedBy}`)),
+        h('button', { class: 'btn', onclick: () => openResume(a) }, 'Open resume (PDF)'))
+    : h('p', { class: 'muted' }, 'No resume uploaded yet. You can still request a meeting and ask the manager for one.');
+
   openDialog({
-    title: a.name,
-    sub: `${a.city}. Managed by ${a.managerName}.`,
+    title: a.name, wide: true,
     body: h('div', { class: 'stack' },
+      h('div', { class: 'row', style: { gap: '16px' } }, avatar(a.name, 64),
+        h('div', {}, h('div', {}, a.industry), h('div', { class: 'muted small' }, `Based in ${a.city}. Managed by ${a.managerName}.`),
+          h('div', { class: 'small' }, `Playing age ${a.playingAge}, height ${a.height}`))),
       h('p', {}, a.bio),
-      h('div', {}, h('strong', { class: 'small' }, 'Languages'), h('div', { class: 'tagrow', style: { marginTop: '4px' } }, a.languages.map(l => h('span', { class: 'tag-pill' }, l)))),
-      h('div', {}, h('strong', { class: 'small' }, 'Genres'), h('div', { class: 'tagrow', style: { marginTop: '4px' } }, a.genres.map(l => h('span', { class: 'tag-pill' }, l)))),
-      h('div', {}, h('strong', { class: 'small' }, 'Busy periods'),
-        upcoming.length
-          ? h('ul', { class: 'block-list' }, upcoming.slice(0, 6).map(b => h('li', {}, h('i', { class: 'dot busy' }), fmtRange(b.start, b.end))))
-          : h('p', { class: 'muted' }, 'Free for the next 8 months.'))),
+      sec('Languages', tags(a.languages)), sec('Genres', tags(a.genres)), sec('Skills', tags(a.skills)),
+      sec('Training', h('ul', { class: 'plain' }, a.training.map(t => h('li', {}, t)))),
+      sec('Selected credits', creditsTable(a.credits)),
+      a.awards.length ? sec('Recognition', h('ul', { class: 'plain' }, a.awards.map(t => h('li', {}, t)))) : null,
+      sec('Acting resume', resume),
+      sec('Busy periods', upcoming.length
+        ? h('ul', { class: 'block-list' }, upcoming.slice(0, 6).map(b => h('li', {}, h('i', { class: 'dot ' + (b.type === 'SHOOTING' ? 'shoot' : b.type === 'VACATION' ? 'vac' : 'busy') }), `${word(b.type)}, ${fmtRange(b.start, b.end)}`)))
+        : h('p', { class: 'muted' }, 'Free for the next 8 months.'))),
     actions: [closeBtn('Close'), { label: 'Request a meeting', kind: 'primary', run: async () => { setTimeout(() => openRequestDialog({ actorId: a.id }), 50); return true; } }],
   });
 }
@@ -397,6 +441,7 @@ function drawCalendar() {
   main.replaceChildren(
     h('div', { class: 'page-head' },
       h('div', { class: 'grow' }, h('h2', {}, 'My actors'), h('p', { class: 'muted' }, 'Keep these dates current so production houses only ask for days you can do.')),
+      h('button', { class: 'btn', onclick: () => openProfile(actor) }, 'View profile'),
       h('button', { class: 'btn primary', onclick: () => openRequestDialog({ actorId: actor.id }) }, 'Request a meeting')),
     h('div', { class: 'chips', role: 'group', 'aria-label': 'Choose an actor', style: { marginBottom: '16px' } },
       S.actors.map(a => h('button', { class: 'chip', 'aria-pressed': a.id === S.actorId ? 'true' : 'false',
@@ -410,7 +455,46 @@ function drawCalendar() {
         cal,
         h('div', { class: 'legend', style: { marginTop: '12px' } },
           h('span', {}, h('i', { class: 'swatch shoot' }), 'Shooting'), h('span', {}, h('i', { class: 'swatch vac' }), 'Vacation'), h('span', {}, h('i', { class: 'swatch free' }), 'Available'))),
-      side));
+      h('div', {}, side, resumePanel(actor))));
+}
+
+function resumePanel(actor) {
+  const r = actor.resume;
+  const input = h('input', { type: 'file', id: 'resumeFile', class: 'visually-hidden', accept: 'application/pdf,.pdf',
+    onchange: e => uploadResume(actor, e.target.files[0]) });
+  return h('div', { class: 'panel stack', style: { marginTop: '20px' } },
+    h('h3', {}, 'Acting resume'),
+    r ? h('div', { class: 'row' },
+          h('div', { class: 'grow' }, h('strong', {}, r.filename),
+            h('div', { class: 'muted small' }, `${kb(r.sizeBytes)}, uploaded ${fmtWhen(r.uploadedAt)} by ${r.uploadedBy}`)),
+          h('button', { class: 'btn small', onclick: () => openResume(actor) }, 'Open'),
+          h('button', { class: 'btn small danger', onclick: () => removeResume(actor) }, 'Remove'))
+      : h('p', { class: 'muted' }, 'No resume yet. Production houses will see this actor without one.'),
+    h('div', {}, input, h('label', { class: 'btn primary', for: 'resumeFile' }, r ? 'Replace PDF' : 'Upload PDF')),
+    h('p', { class: 'muted small' }, 'PDF only, up to 2 MB. Production houses can open it from the actor profile.'));
+}
+
+async function uploadResume(actor, file) {
+  if (!file) return;
+  if (!/\.pdf$/i.test(file.name)) { toast('Only PDF files are accepted', true); return; }
+  if (file.size > 2 * 1024 * 1024) { toast('The file is larger than 2 MB', true); return; }
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const updated = await api(`/actors/${actor.id}/resume`, { method: 'POST', body: form });
+    S.actors = S.actors.map(a => a.id === updated.id ? updated : a);
+    toast('Resume uploaded');
+    drawCalendar();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function removeResume(actor) {
+  try {
+    const updated = await api(`/actors/${actor.id}/resume`, { method: 'DELETE' });
+    S.actors = S.actors.map(a => a.id === updated.id ? updated : a);
+    toast('Resume removed');
+    drawCalendar();
+  } catch (e) { toast(e.message, true); }
 }
 
 function pickDay(ds) {
